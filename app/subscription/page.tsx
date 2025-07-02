@@ -10,6 +10,11 @@ import { useAuth } from "@/contexts/auth-context"
 import { useSubscription } from "@/contexts/subscription-context"
 import { Check, Crown, ArrowLeft, Loader2 } from "lucide-react"
 
+type PaystackMetadata = {
+  custom_fields: Array<{ display_name: string; variable_name: string; value: string }>;
+  [key: string]: any;
+};
+
 export default function SubscriptionPage() {
   const [loading, setLoading] = useState(false)
   const { user, userProfile } = useAuth()
@@ -30,6 +35,28 @@ export default function SubscriptionPage() {
       planId: plan.id,
       userEmail: user?.email,
       userName: userProfile?.displayName,
+      custom_fields: [
+        {
+          display_name: "User ID",
+          variable_name: "user_id",
+          value: user?.uid || "",
+        },
+        {
+          display_name: "Plan ID",
+          variable_name: "plan_id",
+          value: plan.id,
+        },
+        {
+          display_name: "User Email",
+          variable_name: "user_email",
+          value: user?.email || "",
+        },
+        {
+          display_name: "User Name",
+          variable_name: "user_name",
+          value: userProfile?.displayName || "",
+        },
+      ],
     },
   }
 
