@@ -39,15 +39,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [initializing, setInitializing] = useState(true)
+  const [mounted, setMounted] = useState(false)
+
+  let mountedRef = true
 
   useEffect(() => {
-    let mounted = true
+    setMounted(true)
+    mountedRef = true
+  }, [])
+
+  useEffect(() => {
+    if (!mounted) return
 
     // Set persistence to local storage so users stay logged in
     const initializeAuth = async () => {
       try {
-        await setPersistence(auth, browserLocalPersistence)
-        console.log("✅ Auth persistence set to local storage")
+        // Only run on client side
+        if (typeof window !== "undefined") {
+          await setPersistence(auth, browserLocalPersistence)
+          console.log("✅ Auth persistence set to local storage")
+        }
       } catch (error) {
         console.error("❌ Error setting auth persistence:", error)
       }
@@ -58,7 +69,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       console.log("🔄 Auth state changed:", user ? `User: ${user.email}` : "No user")
 
-      if (!mounted) return
+      if (!mountedRef) return
 
       try {
         setUser(user)
@@ -73,7 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch (error) {
         console.error("❌ Error in auth state change:", error)
       } finally {
-        if (mounted) {
+        if (mountedRef) {
           setLoading(false)
           setInitializing(false)
         }
@@ -82,7 +93,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Set a timeout to ensure we don't stay in loading state forever
     const timeout = setTimeout(() => {
-      if (mounted) {
+      if (mountedRef) {
         console.log("⏰ Auth initialization timeout")
         setLoading(false)
         setInitializing(false)
@@ -90,11 +101,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, 5000)
 
     return () => {
-      mounted = false
+      mountedRef = false
       unsubscribe()
       clearTimeout(timeout)
     }
-  }, [])
+  }, [mounted])
 
   const loadUserProfile = async (user: User) => {
     try {
@@ -175,8 +186,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  // Don't render children until we've checked authentication state
-  if (initializing) {
+  // Don't render children until we've checked authentication state and mounted
+  if (!mounted || initializing) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 to-blue-50">
         <div className="text-center">

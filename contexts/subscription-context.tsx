@@ -58,16 +58,49 @@ const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
 export function SubscriptionProvider({ children }: { children: React.ReactNode }) {
   const [subscription, setSubscription] = useState<UserSubscription | null>(null)
   const [loading, setLoading] = useState(true)
-  const { user } = useAuth()
+  const [mounted, setMounted] = useState(false)
+  const { user, loading: authLoading } = useAuth()
 
   useEffect(() => {
-    if (user) {
-      loadUserSubscription()
-    } else {
-      setSubscription(null)
-      setLoading(false)
+    setMounted(true)
+  }, [])
+
+  useEffect(() => {
+    const loadSubscription = async () => {
+      if (!mounted) return
+
+      if (authLoading) {
+        // Still loading auth, wait
+        return
+      }
+
+      if (!user) {
+        // No user, clear subscription
+        if (mounted) {
+          setSubscription(null)
+          setLoading(false)
+        }
+        return
+      }
+
+      try {
+        console.log("💳 Loading subscription for user:", user.uid)
+        await loadUserSubscription()
+      } catch (error) {
+        console.error("❌ Error loading subscription:", error)
+      } finally {
+        if (mounted) {
+          setLoading(false)
+        }
+      }
     }
-  }, [user])
+
+    loadSubscription()
+
+    return () => {
+      setMounted(false)
+    }
+  }, [user, authLoading, mounted])
 
   const loadUserSubscription = async () => {
     if (!user) return
@@ -83,19 +116,21 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
 
         if (endDate && endDate < now && subData.status === "active") {
           // Subscription expired
+          console.log("⏰ Subscription expired, updating status")
           const expiredSub = { ...subData, status: "expired" as const }
           await setDoc(doc(db, "subscriptions", user.uid), expiredSub, { merge: true })
           setSubscription(expiredSub)
         } else {
+          console.log("✅ Subscription loaded:", subData.status)
           setSubscription(subData)
         }
       } else {
+        console.log("📄 No subscription found")
         setSubscription(null)
       }
     } catch (error) {
-      console.error("Error loading subscription:", error)
-    } finally {
-      setLoading(false)
+      console.error("❌ Error loading subscription:", error)
+      setSubscription(null)
     }
   }
 
@@ -103,6 +138,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
     if (!user) return
 
     try {
+      console.log("💳 Updating subscription:", newSubscription.status)
       await setDoc(
         doc(db, "subscriptions", user.uid),
         {
@@ -112,8 +148,9 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
         { merge: true },
       )
       setSubscription(newSubscription)
+      console.log("✅ Subscription updated successfully")
     } catch (error) {
-      console.error("Error updating subscription:", error)
+      console.error("❌ Error updating subscription:", error)
       throw error
     }
   }
@@ -129,12 +166,20 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
       }
       await updateSubscription(cancelledSub)
     } catch (error) {
-      console.error("Error cancelling subscription:", error)
+      console.error("❌ Error cancelling subscription:", error)
       throw error
     }
   }
 
   const isSubscribed = subscription?.status === "active"
+
+  console.log("💳 Subscription context state:", {
+    hasSubscription: !!subscription,
+    status: subscription?.status,
+    isSubscribed,
+    loading,
+    mounted,
+  })
 
   return (
     <SubscriptionContext.Provider

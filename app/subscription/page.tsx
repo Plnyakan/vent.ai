@@ -1,8 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { usePaystackPayment } from "react-paystack"
+import dynamic from "next/dynamic"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -10,59 +10,33 @@ import { useAuth } from "@/contexts/auth-context"
 import { useSubscription } from "@/contexts/subscription-context"
 import { Check, Crown, ArrowLeft, Loader2 } from "lucide-react"
 
-type PaystackMetadata = {
-  custom_fields: Array<{ display_name: string; variable_name: string; value: string }>;
-  [key: string]: any;
-};
+// Dynamically import components that might use window
+const DynamicSubscriptionContent = dynamic(() => Promise.resolve(SubscriptionContent), {
+  ssr: false,
+  loading: () => (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto"></div>
+        <p className="mt-4 text-gray-600">Loading subscription...</p>
+      </div>
+    </div>
+  ),
+})
 
-export default function SubscriptionPage() {
+function SubscriptionContent() {
   const [loading, setLoading] = useState(false)
+  const [mounted, setMounted] = useState(false)
   const { user, userProfile } = useAuth()
   const { plans, subscription, updateSubscription } = useSubscription()
   const router = useRouter()
 
   const plan = plans[0] // Monthly plan
 
-  const config = {
-    reference: `vent-ai-${user?.uid}-${Date.now()}`,
-    email: user?.email || "",
-    amount: plan.price * 100, // Paystack expects amount in kobo (cents)
-    publicKey: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || "",
-    currency: "ZAR",
-    channels: ["card", "bank", "ussd", "qr", "mobile_money", "bank_transfer"],
-    metadata: {
-      userId: user?.uid,
-      planId: plan.id,
-      userEmail: user?.email,
-      userName: userProfile?.displayName,
-      custom_fields: [
-        {
-          display_name: "User ID",
-          variable_name: "user_id",
-          value: user?.uid || "",
-        },
-        {
-          display_name: "Plan ID",
-          variable_name: "plan_id",
-          value: plan.id,
-        },
-        {
-          display_name: "User Email",
-          variable_name: "user_email",
-          value: user?.email || "",
-        },
-        {
-          display_name: "User Name",
-          variable_name: "user_name",
-          value: userProfile?.displayName || "",
-        },
-      ],
-    },
-  }
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
-  const initializePayment = usePaystackPayment(config)
-
-  const handlePayment = () => {
+  const handlePayment = async () => {
     if (!user) {
       router.push("/auth")
       return
@@ -70,42 +44,46 @@ export default function SubscriptionPage() {
 
     setLoading(true)
 
-    initializePayment({
-      onSuccess: async (reference) => {
-        console.log("Payment successful:", reference)
+    try {
+      // For testing - simulate successful payment
+      console.log("Simulating payment...")
 
-        try {
-          // Calculate subscription dates
-          const startDate = new Date()
-          const endDate = new Date()
-          endDate.setMonth(endDate.getMonth() + 1)
+      // Calculate subscription dates
+      const startDate = new Date()
+      const endDate = new Date()
+      endDate.setMonth(endDate.getMonth() + 1)
 
-          // Update subscription in Firebase
-          await updateSubscription({
-            planId: plan.id,
-            status: "active",
-            startDate: startDate,
-            endDate: endDate,
-            lastPaymentDate: startDate,
-            nextPaymentDate: endDate,
-            paystackCustomerCode: reference.customer ?? null,
-            paystackSubscriptionCode: reference.reference?? null,
-          })
+      // Update subscription in Firebase
+      await updateSubscription({
+        planId: plan.id,
+        status: "active",
+        startDate: startDate,
+        endDate: endDate,
+        lastPaymentDate: startDate,
+        nextPaymentDate: endDate,
+        paystackCustomerCode: "test_customer",
+        paystackSubscriptionCode: `test_${Date.now()}`,
+      })
 
-          // Redirect to chat
-          router.push("/chat")
-        } catch (error) {
-          console.error("Error updating subscription:", error)
-          alert("Payment successful but there was an error activating your subscription. Please contact support.")
-        } finally {
-          setLoading(false)
-        }
-      },
-      onClose: () => {
-        console.log("Payment closed")
-        setLoading(false)
-      },
-    })
+      // Redirect to chat
+      router.push("/chat")
+    } catch (error) {
+      console.error("Error updating subscription:", error)
+      alert("There was an error activating your subscription. Please try again.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (!mounted) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    )
   }
 
   if (!user) {
@@ -123,7 +101,7 @@ export default function SubscriptionPage() {
     <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50 p-4">
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center gap-3 mb-6">
-          <Button variant="ghost" size="sm" onClick={() => router.push("/chat")}>
+          <Button variant="ghost" size="sm" onClick={() => router.push("/")}>
             <ArrowLeft className="w-4 h-4" />
           </Button>
           <h1 className="text-2xl font-bold text-gray-800">Choose Your Plan</h1>
@@ -145,7 +123,7 @@ export default function SubscriptionPage() {
                   {subscription.endDate && (
                     <p className="text-sm text-gray-600">
                       {subscription.status === "active" ? "Renews" : "Expires"} on:{" "}
-                      {(subscription.endDate.toDate ? subscription.endDate.toDate() : subscription.endDate).toLocaleDateString()}
+                      {subscription.endDate.toDate().toLocaleDateString()}
                     </p>
                   )}
                 </div>
@@ -186,21 +164,24 @@ export default function SubscriptionPage() {
                   <p className="text-sm text-gray-600 mt-2">Enjoy unlimited access to Vent-AI</p>
                 </div>
               ) : (
-                <Button
-                  onClick={handlePayment}
-                  disabled={loading}
-                  className="w-full bg-purple-600 hover:bg-purple-700 text-lg py-6"
-                  size="lg"
-                >
-                  {loading ? (
-                    <>
-                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                      Processing...
-                    </>
-                  ) : (
-                    <>Subscribe Now - R{plan.price}/month</>
-                  )}
-                </Button>
+                <>
+                  <Button
+                    onClick={handlePayment}
+                    disabled={loading}
+                    className="w-full bg-purple-600 hover:bg-purple-700 text-lg py-6"
+                    size="lg"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      <>Subscribe Now - R{plan.price}/month</>
+                    )}
+                  </Button>
+                  <p className="text-xs text-center text-gray-500">(Demo mode - Click to activate subscription)</p>
+                </>
               )}
 
               <div className="text-center">
@@ -242,4 +223,8 @@ export default function SubscriptionPage() {
       </div>
     </div>
   )
+}
+
+export default function SubscriptionPage() {
+  return <DynamicSubscriptionContent />
 }
