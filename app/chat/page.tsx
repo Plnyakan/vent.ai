@@ -500,7 +500,7 @@ export default function ChatPage() {
 
         {/* Input */}
         <div className="bg-white border-t p-4 shadow-sm">
-          <form onSubmit={sendMessage} className="flex gap-2 ml-90 mr-90">
+          <form onSubmit={sendMessage} className="flex gap-2 lg:ml-90 lg:mr-90">
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}
