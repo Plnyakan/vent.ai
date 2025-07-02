@@ -123,7 +123,7 @@ function SubscriptionContent() {
                   {subscription.endDate && (
                     <p className="text-sm text-gray-600">
                       {subscription.status === "active" ? "Renews" : "Expires"} on:{" "}
-                      {subscription.endDate.toDate().toLocaleDateString()}
+                      {(subscription.endDate.toDate ? subscription.endDate.toDate() : subscription.endDate).toLocaleDateString()}
                     </p>
                   )}
                 </div>
