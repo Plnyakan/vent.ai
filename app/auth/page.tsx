@@ -2,29 +2,46 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/contexts/auth-context"
+import { useSubscription } from "@/contexts/subscription-context"
 import { Bot, Phone, Heart, Shield, MessageCircle } from "lucide-react"
 
 export default function AuthPage() {
   const [phone, setPhone] = useState("")
   const [showPhoneInput, setShowPhoneInput] = useState(false)
   const [loading, setLoading] = useState(false)
-  const { signInWithGoogle, updateUserProfile, userProfile } = useAuth()
+  const { user, signInWithGoogle, updateUserProfile, userProfile } = useAuth()
+  const { isSubscribed } = useSubscription()
   const router = useRouter()
+
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (user && userProfile) {
+      console.log("🔄 User already authenticated, checking subscription...")
+      if (isSubscribed) {
+        console.log("➡️ User subscribed, redirecting to chat")
+        router.replace("/chat")
+      } else {
+        console.log("➡️ User not subscribed, redirecting to subscription")
+        router.replace("/subscription")
+      }
+    }
+  }, [user, userProfile, isSubscribed, router])
 
   const handleGoogleSignIn = async () => {
     try {
       setLoading(true)
+      console.log("🔐 Starting Google sign in...")
       await signInWithGoogle()
       setShowPhoneInput(true)
     } catch (error) {
-      console.error("Sign in failed:", error)
+      console.error("❌ Sign in failed:", error)
     } finally {
       setLoading(false)
     }
@@ -37,16 +54,38 @@ export default function AuthPage() {
     try {
       setLoading(true)
       await updateUserProfile({ phone })
-      router.push("/chat")
+
+      // Check subscription status and redirect accordingly
+      if (isSubscribed) {
+        router.replace("/chat")
+      } else {
+        router.replace("/subscription")
+      }
     } catch (error) {
-      console.error("Failed to update profile:", error)
+      console.error("❌ Failed to update profile:", error)
     } finally {
       setLoading(false)
     }
   }
 
   const skipPhoneNumber = () => {
-    router.push("/chat")
+    if (isSubscribed) {
+      router.replace("/chat")
+    } else {
+      router.replace("/subscription")
+    }
+  }
+
+  // Don't show anything while checking authentication
+  if (user && userProfile) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 to-blue-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Redirecting...</p>
+        </div>
+      </div>
+    )
   }
 
   if (showPhoneInput && userProfile) {
@@ -67,7 +106,7 @@ export default function AuthPage() {
                 <Input
                   id="phone"
                   type="tel"
-                  placeholder="+1 (555) 123-4567"
+                  placeholder="+27 (123) 456-7890"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   className="border-purple-200 focus:border-purple-400"

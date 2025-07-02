@@ -21,7 +21,7 @@ import {
 import { useAuth } from "@/contexts/auth-context"
 import { useVoiceRecorder } from "@/hooks/use-voice-recorder"
 import { useClearChat } from "@/hooks/use-clear-chat"
-import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, limit } from "firebase/firestore"
+import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, limit, where } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import {
   Send,
@@ -38,6 +38,7 @@ import {
   MoreVertical,
   AlertCircle,
 } from "lucide-react"
+import { SubscriptionGuard } from "@/components/subscription-guard"
 
 interface FirebaseMessage {
   id: string
@@ -49,6 +50,7 @@ interface FirebaseMessage {
   audioDuration?: number
   timestamp: any
   isAI?: boolean
+  conversationId?: string
 }
 
 interface ChatMessage {
@@ -83,8 +85,14 @@ export default function ChatPage() {
 
     console.log("👤 Setting up Firebase listener for user:", user.uid)
 
-    // Listen to Firebase messages
-    const messagesQuery = query(collection(db, "messages"), orderBy("timestamp", "desc"), limit(50))
+    // 🔧 SIMPLIFIED QUERY: Use conversationId to filter messages for this user
+    // This avoids complex composite indexes
+    const messagesQuery = query(
+      collection(db, "messages"),
+      where("conversationId", "==", user.uid), // All messages in this user's conversation
+      orderBy("timestamp", "desc"),
+      limit(50),
+    )
 
     const unsubscribe = onSnapshot(
       messagesQuery,
@@ -93,7 +101,7 @@ export default function ChatPage() {
 
         const newMessages = snapshot.docs.map((doc) => {
           const data = doc.data()
-          console.log("📄 Message data:", { id: doc.id, ...data })
+          console.log("📄 Message data:", { id: doc.id, senderId: data.senderId, isAI: data.isAI })
           return {
             id: doc.id,
             ...data,
@@ -101,9 +109,9 @@ export default function ChatPage() {
         }) as FirebaseMessage[]
 
         const sortedMessages = newMessages.reverse()
-        console.log("📋 Final messages array:", sortedMessages)
+        console.log("📋 Messages for user conversation:", sortedMessages.length)
         setFirebaseMessages(sortedMessages)
-        setDebugInfo(`Messages loaded: ${sortedMessages.length}`)
+        setDebugInfo(`Messages loaded: ${sortedMessages.length} (conversation: ${user.uid})`)
       },
       (error) => {
         console.error("❌ Firebase listener error:", error)
@@ -135,7 +143,7 @@ export default function ChatPage() {
     console.log("📤 Sending user message:", userMessage)
 
     try {
-      // Save user message to Firebase
+      // 🔒 SAVE USER MESSAGE WITH CONVERSATION ID
       const userDocRef = await addDoc(collection(db, "messages"), {
         senderId: user.uid,
         senderName: userProfile.displayName,
@@ -143,6 +151,7 @@ export default function ChatPage() {
         text: userMessage,
         timestamp: serverTimestamp(),
         isAI: false,
+        conversationId: user.uid, // Key field for filtering
       })
       console.log("✅ User message saved with ID:", userDocRef.id)
 
@@ -170,7 +179,7 @@ export default function ChatPage() {
       console.log("🤖 AI Response received:", data)
 
       if (data.message) {
-        // Save AI response to Firebase
+        // 🔒 SAVE AI RESPONSE WITH SAME CONVERSATION ID
         const aiDocRef = await addDoc(collection(db, "messages"), {
           senderId: "vent-ai",
           senderName: "Vent-AI",
@@ -178,6 +187,7 @@ export default function ChatPage() {
           text: data.message,
           timestamp: serverTimestamp(),
           isAI: true,
+          conversationId: user.uid, // Same conversation as user
         })
         console.log("✅ AI message saved with ID:", aiDocRef.id)
 
@@ -203,6 +213,7 @@ export default function ChatPage() {
       const uploadedUrl = await uploadAudio(user.uid)
 
       if (uploadedUrl) {
+        // 🔒 SAVE VOICE MESSAGE WITH CONVERSATION ID
         await addDoc(collection(db, "messages"), {
           senderId: user.uid,
           senderName: userProfile.displayName,
@@ -211,6 +222,7 @@ export default function ChatPage() {
           audioDuration: duration,
           timestamp: serverTimestamp(),
           isAI: false,
+          conversationId: user.uid,
         })
         resetRecording()
       }
@@ -276,269 +288,248 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gradient-to-br from-purple-50 to-blue-50">
-      {/* Error Display */}
-      {error && (
-        <div className="bg-red-100 border-b px-4 py-2 text-sm text-red-800 flex items-center gap-2">
-          <AlertCircle className="w-4 h-4" />
-          <span>{error}</span>
-          <button onClick={() => setError(null)} className="ml-auto text-red-600 hover:text-red-800">
-            ×
-          </button>
-        </div>
-      )}
-
-      {/* Debug Info */}
-      {/* {debugInfo && (
-        <div className="bg-yellow-100 border-b px-4 py-2 text-sm">
-          <strong>Debug:</strong> {debugInfo} | Messages: {firebaseMessages.length} | AI Loading:{" "}
-          {isLoading ? "Yes" : "No"}
-        </div>
-      )} */}
-
-      {/* Header */}
-      <div className="bg-white border-b px-4 py-3 flex items-center justify-between shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <Avatar className="border-2 border-purple-200">
-              <AvatarImage src="/ai-avatar.png" />
-              <AvatarFallback className="bg-purple-100">
-                <Bot className="w-4 h-4 text-purple-600" />
-              </AvatarFallback>
-            </Avatar>
-            <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-400 rounded-full border-2 border-white"></div>
-          </div>
-          <div>
-            <h1 className="font-semibold text-gray-800">Vent-AI</h1>
-            <p className="text-sm text-gray-500 flex items-center gap-1">
-              <Heart className="w-3 h-3 text-red-400" />
-              Your empathetic AI companion
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Button variant="ghost" size="sm" onClick={() => setShowMenu(!showMenu)}>
-              <MoreVertical className="w-4 h-4" />
-            </Button>
-            {showMenu && (
-              <div className="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg py-1 z-10 min-w-[160px]">
-                <button
-                  onClick={() => router.push("/profile")}
-                  className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-                >
-                  <Settings className="w-4 h-4" />
-                  Profile Settings
-                </button>
-
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <button className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2 text-red-600">
-                      <Trash2 className="w-4 h-4" />
-                      Clear Chat History
-                    </button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Clear Chat History?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This will permanently delete all your messages and conversations with Vent-AI. This action
-                        cannot be undone.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction
-                        onClick={handleClearChat}
-                        disabled={isClearing}
-                        className="bg-red-600 hover:bg-red-700"
-                      >
-                        {isClearing ? "Clearing..." : "Clear Chat"}
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-
-                <div className="border-t my-1"></div>
-                <button
-                  onClick={handleLogout}
-                  className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-                >
-                  <LogOut className="w-4 h-4" />
-                  Sign Out
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Welcome Message */}
-      {firebaseMessages.length === 0 && (
-        <div className="p-6 text-center">
-          <div className="bg-white rounded-lg p-6 shadow-sm border border-purple-100">
-            <Bot className="w-12 h-12 text-purple-600 mx-auto mb-4" />
-            <h2 className="text-xl font-semibold text-gray-800 mb-2">Welcome back to Vent-AI</h2>
-            <p className="text-gray-600 mb-4">
-              I'm here to listen without judgment. Share what's on your mind, your feelings, or anything you need to
-              vent about. This is a safe space for you to express yourself.
-            </p>
-            <p className="text-sm text-purple-600">💜 Your conversations are private and secure</p>
-          </div>
-        </div>
-      )}
-
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {firebaseMessages.length > 0 ? (
-          firebaseMessages.map((message) => (
-            <div
-              key={message.id}
-              className={`flex gap-3 ${message.senderId === user.uid ? "flex-row-reverse" : "flex-row"}`}
-            >
-              <Avatar className="w-8 h-8">
-                {message.isAI || message.senderId === "vent-ai" ? (
-                  <AvatarFallback className="bg-purple-100">
-                    <Bot className="w-4 h-4 text-purple-600" />
-                  </AvatarFallback>
-                ) : (
-                  <>
-                    <AvatarImage src={message.senderPhoto || "/placeholder.svg"} />
-                    <AvatarFallback>
-                      <User className="w-4 h-4" />
-                    </AvatarFallback>
-                  </>
-                )}
-              </Avatar>
-              <div
-                className={`max-w-xs lg:max-w-md rounded-lg p-3 shadow-sm ${
-                  message.senderId === user.uid
-                    ? "bg-blue-500 text-white"
-                    : message.isAI || message.senderId === "vent-ai"
-                      ? "bg-purple-100 text-purple-900 border border-purple-200"
-                      : "bg-white border"
-                }`}
-              >
-                {message.senderId !== user.uid && !message.isAI && message.senderId !== "vent-ai" && (
-                  <p className="text-xs font-medium mb-1 text-gray-600">{message.senderName}</p>
-                )}
-
-                {message.text && <p className="leading-relaxed">{message.text}</p>}
-
-                {message.audioUrl && (
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant={message.senderId === user.uid ? "secondary" : "default"}
-                      onClick={() => playAudio(message.audioUrl!, message.id)}
-                    >
-                      {playingAudio === message.id ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                    </Button>
-                    <span className="text-xs">{formatDuration(message.audioDuration || 0)}</span>
-                  </div>
-                )}
-
-                <p className="text-xs mt-1 opacity-70">
-                  {message.timestamp?.toDate?.()?.toLocaleTimeString() || "Sending..."}
-                </p>
-              </div>
-            </div>
-          ))
-        ) : (
-          <div className="text-center text-gray-500">
-            <p>No messages yet. Start a conversation!</p>
-          </div>
-        )}
-
-        {/* Show AI typing indicator */}
-        {isLoading && (
-          <div className="flex gap-3">
-            <Avatar className="w-8 h-8">
-              <AvatarFallback className="bg-purple-100">
-                <Bot className="w-4 h-4 text-purple-600" />
-              </AvatarFallback>
-            </Avatar>
-            <div className="bg-purple-100 text-purple-900 border border-purple-200 rounded-lg p-3 shadow-sm">
-              <div className="flex items-center gap-2">
-                <div className="flex gap-1">
-                  <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce"></div>
-                  <div
-                    className="w-2 h-2 bg-purple-400 rounded-full animate-bounce"
-                    style={{ animationDelay: "0.1s" }}
-                  ></div>
-                  <div
-                    className="w-2 h-2 bg-purple-400 rounded-full animate-bounce"
-                    style={{ animationDelay: "0.2s" }}
-                  ></div>
-                </div>
-                <span className="text-sm">Vent-AI is thinking...</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Voice Recording Preview */}
-      {audioUrl && (
-        <div className="bg-yellow-50 border-t p-4">
+    <SubscriptionGuard>
+      <div className="flex flex-col h-screen bg-gradient-to-br from-purple-50 to-blue-50">
+        {/* Header */}
+        <div className="bg-white border-b px-4 py-3 flex items-center justify-between shadow-sm">
           <div className="flex items-center gap-3">
-            <Button
-              size="sm"
-              onClick={() => {
-                if (audioRef.current) {
-                  audioRef.current.src = audioUrl
-                  audioRef.current.play()
-                }
-              }}
-            >
-              <Play className="w-4 h-4" />
-            </Button>
-            <span className="text-sm">Voice message ({formatDuration(duration)})</span>
-            <div className="flex gap-2 ml-auto">
-              <Button size="sm" onClick={sendVoiceMessage} disabled={isLoading}>
-                Send
+            <div className="relative">
+              <Avatar className="border-2 border-purple-200">
+                <AvatarImage src="/ai-avatar.png" />
+                <AvatarFallback className="bg-purple-100">
+                  <Bot className="w-4 h-4 text-purple-600" />
+                </AvatarFallback>
+              </Avatar>
+              <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-400 rounded-full border-2 border-white"></div>
+            </div>
+            <div>
+              <h1 className="font-semibold text-gray-800">Vent-AI</h1>
+              <p className="text-sm text-gray-500 flex items-center gap-1">
+                <Heart className="w-3 h-3 text-red-400" />
+                Your private AI companion
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Button variant="ghost" size="sm" onClick={() => setShowMenu(!showMenu)}>
+                <MoreVertical className="w-4 h-4" />
               </Button>
-              <Button size="sm" variant="outline" onClick={resetRecording}>
-                Cancel
-              </Button>
+              {showMenu && (
+                <div className="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg py-1 z-10 min-w-[160px]">
+                  <button
+                    onClick={() => router.push("/profile")}
+                    className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                  >
+                    <Settings className="w-4 h-4" />
+                    Profile Settings
+                  </button>
+
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <button className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2 text-red-600">
+                        <Trash2 className="w-4 h-4" />
+                        Clear Chat History
+                      </button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Clear Chat History?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will permanently delete all your messages and conversations with Vent-AI. This action
+                          cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={handleClearChat}
+                          disabled={isClearing}
+                          className="bg-red-600 hover:bg-red-700"
+                        >
+                          {isClearing ? "Clearing..." : "Clear Chat"}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+
+                  <div className="border-t my-1"></div>
+                  <button
+                    onClick={handleLogout}
+                    className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Sign Out
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
-      )}
 
-      {/* Input */}
-      <div className="bg-white border-t p-4 shadow-sm">
-        <form onSubmit={sendMessage} className="flex gap-2">
-          <Input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Share what's on your mind... I'm here to listen 💜"
-            disabled={isLoading || isRecording}
-            className="flex-1 border-purple-200 focus:border-purple-400"
-          />
-          <Button
-            type="button"
-            variant={isRecording ? "destructive" : "outline"}
-            onClick={isRecording ? stopRecording : startRecording}
-            disabled={isLoading}
-          >
-            {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-          </Button>
-          <Button type="submit" disabled={isLoading || !input.trim()} className="bg-purple-600 hover:bg-purple-700">
-            <Send className="w-4 h-4" />
-          </Button>
-        </form>
-        {isRecording && (
-          <p className="text-sm text-red-600 mt-2 flex items-center gap-2">
-            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-            Recording your voice message... {formatDuration(duration)}
-          </p>
+        {/* Welcome Message */}
+        {firebaseMessages.length === 0 && (
+          <div className="p-6 text-center">
+            <div className="bg-white rounded-lg p-6 shadow-sm border border-purple-100">
+              <Bot className="w-12 h-12 text-purple-600 mx-auto mb-4" />
+              <h2 className="text-xl font-semibold text-gray-800 mb-2">Welcome to your private Vent-AI session</h2>
+              <p className="text-gray-600 mb-4">
+                I'm here to listen without judgment. Share what's on your mind, your feelings, or anything you need to
+                vent about. This is your personal safe space.
+              </p>
+              <p className="text-sm text-purple-600">🔒 Your conversations are completely private and secure</p>
+            </div>
+          </div>
         )}
-      </div>
 
-      <audio ref={audioRef} />
-    </div>
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {firebaseMessages.length > 0 ? (
+            firebaseMessages.map((message) => (
+              <div
+                key={message.id}
+                className={`flex gap-3 ${message.senderId === user.uid ? "flex-row-reverse" : "flex-row"}`}
+              >
+                <Avatar className="w-8 h-8">
+                  {message.isAI || message.senderId === "vent-ai" ? (
+                    <AvatarFallback className="bg-purple-100">
+                      <Bot className="w-4 h-4 text-purple-600" />
+                    </AvatarFallback>
+                  ) : (
+                    <>
+                      <AvatarImage src={message.senderPhoto || "/placeholder.svg"} />
+                      <AvatarFallback>
+                        <User className="w-4 h-4" />
+                      </AvatarFallback>
+                    </>
+                  )}
+                </Avatar>
+                <div
+                  className={`max-w-xs lg:max-w-md rounded-lg p-3 shadow-sm ${
+                    message.senderId === user.uid
+                      ? "bg-blue-500 text-white"
+                      : message.isAI || message.senderId === "vent-ai"
+                        ? "bg-purple-100 text-purple-900 border border-purple-200"
+                        : "bg-white border"
+                  }`}
+                >
+                  {message.text && <p className="leading-relaxed">{message.text}</p>}
+
+                  {message.audioUrl && (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant={message.senderId === user.uid ? "secondary" : "default"}
+                        onClick={() => playAudio(message.audioUrl!, message.id)}
+                      >
+                        {playingAudio === message.id ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                      </Button>
+                      <span className="text-xs">{formatDuration(message.audioDuration || 0)}</span>
+                    </div>
+                  )}
+
+                  <p className="text-xs mt-1 opacity-70">
+                    {message.timestamp?.toDate?.()?.toLocaleTimeString() || "Sending..."}
+                  </p>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="text-center text-gray-500">
+              <p>No messages yet. Start your private conversation!</p>
+            </div>
+          )}
+
+          {/* Show AI typing indicator */}
+          {isLoading && (
+            <div className="flex gap-3">
+              <Avatar className="w-8 h-8">
+                <AvatarFallback className="bg-purple-100">
+                  <Bot className="w-4 h-4 text-purple-600" />
+                </AvatarFallback>
+              </Avatar>
+              <div className="bg-purple-100 text-purple-900 border border-purple-200 rounded-lg p-3 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <div className="flex gap-1">
+                    <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce"></div>
+                    <div
+                      className="w-2 h-2 bg-purple-400 rounded-full animate-bounce"
+                      style={{ animationDelay: "0.1s" }}
+                    ></div>
+                    <div
+                      className="w-2 h-2 bg-purple-400 rounded-full animate-bounce"
+                      style={{ animationDelay: "0.2s" }}
+                    ></div>
+                  </div>
+                  <span className="text-sm">Vent-AI is thinking...</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Voice Recording Preview */}
+        {audioUrl && (
+          <div className="bg-yellow-50 border-t p-4">
+            <div className="flex items-center gap-3">
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (audioRef.current) {
+                    audioRef.current.src = audioUrl
+                    audioRef.current.play()
+                  }
+                }}
+              >
+                <Play className="w-4 h-4" />
+              </Button>
+              <span className="text-sm">Voice message ({formatDuration(duration)})</span>
+              <div className="flex gap-2 ml-auto">
+                <Button size="sm" onClick={sendVoiceMessage} disabled={isLoading}>
+                  Send
+                </Button>
+                <Button size="sm" variant="outline" onClick={resetRecording}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Input */}
+        <div className="bg-white border-t p-4 shadow-sm">
+          <form onSubmit={sendMessage} className="flex gap-2 ml-90 mr-90">
+            <Input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Share what's on your mind... I'm here to listen 💜"
+              disabled={isLoading || isRecording}
+              className="flex-1 border-purple-200 focus:border-purple-400"
+            />
+            <Button
+              type="button"
+              variant={isRecording ? "destructive" : "outline"}
+              onClick={isRecording ? stopRecording : startRecording}
+              disabled={isLoading}
+            >
+              {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            </Button>
+            <Button type="submit" disabled={isLoading || !input.trim()} className="bg-purple-600 hover:bg-purple-700">
+              <Send className="w-4 h-4" />
+            </Button>
+          </form>
+          {isRecording && (
+            <p className="text-sm text-red-600 mt-2 flex items-center gap-2">
+              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+              Recording your voice message... {formatDuration(duration)}
+            </p>
+          )}
+        </div>
+
+        <audio ref={audioRef} />
+      </div>
+    </SubscriptionGuard>
   )
 }

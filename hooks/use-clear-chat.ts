@@ -11,32 +11,29 @@ export function useClearChat() {
     try {
       setIsClearing(true)
 
-      // Get all messages from this user
-      const messagesQuery = query(collection(db, "messages"), where("senderId", "==", userId))
+      console.log("🗑️ Clearing messages for user conversation:", userId)
 
-      const userMessagesSnapshot = await getDocs(messagesQuery)
+      // 🔧 SIMPLIFIED: Get all messages in this user's conversation
+      const conversationQuery = query(collection(db, "messages"), where("conversationId", "==", userId))
 
-      // Get all AI responses (we'll clear these too for a fresh start)
-      const aiMessagesQuery = query(collection(db, "messages"), where("isAI", "==", true))
+      const conversationSnapshot = await getDocs(conversationQuery)
 
-      const aiMessagesSnapshot = await getDocs(aiMessagesQuery)
+      console.log("📊 Found messages to delete:", conversationSnapshot.docs.length)
 
       // Use batch to delete all messages efficiently
       const batch = writeBatch(db)
 
-      userMessagesSnapshot.docs.forEach((doc) => {
-        batch.delete(doc.ref)
-      })
-
-      aiMessagesSnapshot.docs.forEach((doc) => {
+      conversationSnapshot.docs.forEach((doc) => {
+        console.log("🗑️ Deleting message:", doc.id)
         batch.delete(doc.ref)
       })
 
       await batch.commit()
 
+      console.log("✅ Successfully cleared conversation for user:", userId)
       return true
     } catch (error) {
-      console.error("Error clearing chat:", error)
+      console.error("❌ Error clearing chat:", error)
       return false
     } finally {
       setIsClearing(false)

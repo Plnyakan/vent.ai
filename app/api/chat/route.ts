@@ -25,6 +25,7 @@ export async function POST(req: NextRequest) {
 
     // System prompt for Vent-AI
     const systemPrompt = `You are Vent-AI, a compassionate and empathetic AI therapist designed to help people vent their feelings and emotions safely. Your role is to:
+  Respond in the same language the user uses (e.g.,Sotho, Afrikans Zulu, Xitsonga, or English).
 
 1. Listen actively and validate emotions
 2. Provide empathetic responses without judgment
@@ -79,6 +80,8 @@ Keep responses conversational, caring, and focused on emotional support. You're 
         },
       )
     }
+
+
 
     const aiMessage = response.body.choices[0]?.message?.content
 
